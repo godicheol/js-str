@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>index.html</title>
+    <style>
+        html, body{
+            padding: 0;
+            margin: 0;
+            font-size: 0.9rem;
+        }
+        *, *::after, *::before{
+            box-sizing: border-box;
+            font-family: Arial, Helvetica, sans-serif;
+        }
+        #file-input{
+            margin: 8px;
+        }
+        #filename-input{
+            width: 384px;
+            margin: 8px 0;
+            text-align: right;
+        }
+        #download-button{
+            margin: 8px 8px 8px 0;
+        }
+        #result-textarea{
+            width: 100%;
+            height: 50vh;
+            line-height: 1.4;
+            padding: 8px;
+            outline: 0;
+            border: 0;
+            background-color: #EEE;
+            resize: vertical;
+        }
+        #search-textarea,
+        #replace-textarea,
+        #header-textarea,
+        #footer-textarea{
+            display: block;
+            width: 100%;
+            min-height: 64px;
+            line-height: 1.4;
+            padding: 8px;
+            margin-top: 8px;
+            margin-bottom: 8px;
+            outline: 0;
+            border: 0;
+            background-color: #EEE;
+            resize: vertical;
+        }
+        #file-list{
+            display: inline-block;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+        #file-list li:nth-child(1){
+            border-top: 0;
+        }
+        #file-list li{
+            border-top: 1px solid #000;
+            padding: 4px 8px;
+            margin: 0;
+            color: blue;
+            cursor: pointer;
+        }
+        #file-list li:hover{
+            text-decoration: underline;
+        }
+        #file-list li > a{
+            color: red;
+            margin-left: 8px;
+            text-decoration: none;
+        }
+        .drag-dst{
+            color: red !important;
+            text-decoration: underline;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- html -->
+    <div>
+        <div style="float: left;">
+            <input id="file-input" type="file" accept="text/plain" tabindex="-1" multiple>
+        </div>
+        <div style="float: right;">
+            <input id="filename-input" type="text" value="" placeholder="File name">
+            <button id="download-button">Download</button>
+        </div>
+        <div style="clear: both;"></div>
+    </div>
+    <div style="text-align: center;">
+        <div style="color: #777; margin-bottom: 4px;">
+            Drag and Drop.
+            <br />
+            Rerender when changed.
+        </div>
+        <ol id="file-list"></ol>
+        <div>
+            <a id="clear-button" style="color: red;" href="javascript:void(0)">Clear</a>
+        </div>
+    </div>
+    <div style="display: flex; padding: 0 8px;">
+        <div style="flex: 1; margin-right: 4px;">
+            <textarea id="header-textarea" placeholder="Enter header here. {{filename|name|index|size}}&#13;&#10;Rerender when changed." tabindex="-1"></textarea>
+        </div>
+        <div style="flex: 1; margin-left: 4px;">
+            <textarea id="footer-textarea" placeholder="Enter footer here. {{filename|name|index|size}}&#13;&#10;Rerender when changed." tabindex="-1"></textarea>
+        </div>
+    </div>
+    <div style="padding: 0 8px;">
+        <textarea id="result-textarea" tabindex="-1"></textarea>
+    </div>
+    <div style="display: flex; padding: 0 8px;">
+        <div style="flex: 1; margin-right: 4px;">
+            <textarea id="search-textarea" placeholder="Enter target here." tabindex="1" resize="vertical"></textarea>
+        </div>
+        <div style="flex: 1; margin-left: 4px;">
+            <textarea id="replace-textarea" placeholder="Enter replacement here." tabindex="2" resize="vertical"></textarea>
+        </div>
+    </div>
+    <div>
+        <div style="padding: 0 8px;">
+            <button id="prev-button" tabindex="-1">Prev</button>
+            <input id="curr-input" type="hidden" value="0" tabindex="-1">
+            <span id="search-result" tabindex="-1">0 / 0</span>
+            <button id="next-button" tabindex="-1">Next</button>
+            <button id="replace-button" tabindex="-1">Replace</button>
+            <button id="replace-all-button" tabindex="-1">Replace All</button>
+            <span style="color: #777;">* Press "Tab key" with put focus on the textarea.</span>
+        </div>
+    </div>
+    <!-- js -->
+    <script src="./index.js"></script>
+    <script>
+        var result = "";
+        var files = [];
+        var searchResult = [];
+        var dragSrc;
+        var dragDst;
+
+        var tokenGetters = {
+            filename: function(file) {
+                return file.file.name;
+            },
+            name: function(file) {
+                return file.file.name.replace(/\.[0-9A-Za-z]{1,}$/, "");
+            },
+            index: function(file) {
+                return "" + (file.indexOf() + 1);
+            },
+            size: function(file) {
+                return file.value.length;
+            }
+        }
+        function setBrackets(token) {
+            return "{{"+token+"}}";
+        }
+        function sortFiles(arr) {
+            return arr.sort(function(a, b) {
+                return jsStr.compare(a.file.name, b.file.name);
+            });
+        }
+        function pushFiles(arr) {
+            arr = sortFiles(arr);
+            for (var file of arr) {
+                files.push(file);
+            }
+        }
+        function generateId() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+        async function getFiles(e) {
+            if (e.target.files.length < 1) {
+                return false;
+            }
+            var newFiles = [];
+            for (var file of e.target.files) {
+                newFiles.push({
+                    id: generateId(),
+                    isLoaded: false,
+                    encoding: "utf-8",
+                    file: file,
+                    value: null,
+                    indexOf: function() {
+                        for (var i = 0; i < files.length; i++) {
+                            if (files[i].id === this.id) {
+                                return i;
+                            }
+                        }
+                        throw new Error("File not found");
+                    },
+                    load: async function() {
+                        try {
+                            this.value = await loadFile(this.file, this.encoding);
+                            this.isLoaded = true;
+                            return true;
+                        } catch(err) {
+                            console.error(err);
+                            return false;
+                        }
+                    },
+                    remove: function() {
+                        files.splice(this.indexOf(), 1); // remove
+                        return true;
+                    }
+                });
+            }
+            pushFiles(newFiles);
+            await startLoading();
+            startRendering();
+            renderFileName();
+            e.target.value = "";
+        }
+        function loadFile(file, encoding) {
+            return new Promise(function(resolve, reject) {
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    resolve(reader.result);
+                    return false;
+                }
+                reader.onerror = function(err) {
+                    reject(err);
+                    return false;
+                }
+                reader.readAsText(file, encoding || "utf-8");
+            });
+        }
+        async function startLoading() {
+            for (var i = 0; i < files.length; i++) {
+                var file = files[i];
+                if (!file.isLoaded) {
+                    var res = await file.load();
+                    if (!res) {
+                        file.remove();
+                    }
+                }
+            }
+        }
+        function renderFileName() {
+            var filename = getFileName(files);
+            var [basename, ext] = filename.split("\.");
+            var vols = getVolumnRange(files);
+
+            basename = basename.replace(/[\s\`\~\!\@\#\$\%\^\&\*\(\)\_\+\-\=\[\]\{\}\\\|\;\'\:\"\<\>\?\,\.\/\']+$/g, "");
+
+            var volume = "";
+            if (vols[0] !== 9999 && vols[1] !== 0) {
+                if (vols[0] === vols[1]) {
+                    volume += "_v"+vols[0];
+                } else if (vols[0] < vols[1]) {
+                    volume += "_v"+vols[0]+"\-"+vols[1];
+                }
+            }
+            
+            document.querySelector("#filename-input").value = basename + volume + "\." + ext;
+        }
+        function getFileName(arr) {
+            return arr.map(function(file) {
+                return file.file.name;
+            }).reduce(function(prev, curr) {
+                return !prev ? curr : jsStr.parse(prev, curr).reduce(function(p, c) {
+                    return c.isMatched ? p + jsStr.get(curr, c.to) : p;
+                }, "");
+            }, undefined);
+        }
+        function getVolumnRange(arr) {
+            return arr.map(function(file) {
+                var n = file.file.name.split(/(\d+)/).filter(function(str) {
+                    return !isNaN(parseFloat(str)) && isFinite(str);
+                }).pop();
+
+                return n ? parseInt(n) : 0;
+            })
+            .filter(Boolean)
+            .reduce(function([start, end], curr) {
+                if (curr < start) {
+                    start = curr;
+                }
+                if (curr > end) {
+                    end = curr;
+                }
+                return [start, end];
+            }, [9999, 0]);
+        }
+        function startRendering() {
+            clearResult();
+            renderResult();
+            clearList();
+            renderList();
+            searchText();
+        }
+        function clearResult() {
+            result = "";
+            document.querySelector("#result-textarea").value = result;
+        }
+        function renderResult() {
+            var header = document.querySelector("#header-textarea").value;
+            var footer = document.querySelector("#footer-textarea").value;
+            for (var file of files) {
+                if (file.isLoaded) {
+                    var text = "";
+                    text += replaceByToken(header, file);
+                    text += file.value;
+                    text += replaceByToken(footer, file);
+                    result += text;
+                }
+            }
+            document.querySelector("#result-textarea").value = result;
+        }
+        function replaceByToken(str, file) {
+            for (var key in tokenGetters) {
+                var token = setBrackets(key);
+                var value = tokenGetters[key](file);
+                var arr = jsStr.search(str, token);
+                str = jsStr.replace(str, arr, value);
+            }
+            return str;
+        }
+        function clearList() {
+            document.querySelector("#file-list").innerHTML = "";
+        }
+        function renderList() {
+            for (var file of files) {
+                renderListItem(file);
+            }
+        }
+        function renderListItem(file) {
+            function add(tag, val) {
+                return "<"+tag+">"+val+"</"+tag+">";
+            }
+            var li = document.createElement("li");
+            li.setAttribute("draggable", true);
+            li.setAttribute("data-id", file.id);
+
+            var text = document.createElement("span");
+            text.style.float = "left";
+            text.textContent = file.file.name + "\, " + file.value.length + " ch";
+
+            var removeFile = function(e) {
+                file.remove();
+                startRendering();
+                console.log("File removed:", file.file.name);
+            }
+
+            var rm = document.createElement("a");
+            rm.style.float = "right";
+            rm.href = "javascript:void(0)";
+            rm.textContent = "X";
+            rm.addEventListener("click", removeFile);
+
+            var div = document.createElement("div");
+            div.style.clear = "both";
+
+            li.appendChild(text);
+            li.appendChild(rm);
+            li.appendChild(div);
+
+            setListItemEvent(li);
+            document.querySelector("#file-list").appendChild(li);
+        }
+
+        function setListItemEvent(li) {
+            li.addEventListener("dragstart", function(e) {
+                dragSrc = e.target;
+                dragDst = e.target;
+            });
+            li.addEventListener("dragover", preventEvt);
+            li.addEventListener("dragenter", function(e) {
+                if (e.target.tagName.toLowerCase() === "li") {
+                    dragDst.classList.remove("drag-dst");
+                    dragDst = e.target;
+                    if (!dragSrc.isSameNode(dragDst)) {
+                        dragDst.classList.add("drag-dst");
+                    }
+                }
+            });
+            li.addEventListener("dragend", function(e) {
+                dragDst.classList.remove("drag-dst");
+                if (!dragSrc.isSameNode(dragDst)) {
+                    changeIndex(dragSrc, dragDst);
+                }
+            });
+        }
+        function preventEvt(e) {
+            e.preventDefault();
+        }
+        function searchText(e) {
+            var target = document.querySelector("#search-textarea").value;
+            if (target.length < 1) {
+                document.querySelector("#search-result").innerHTML = "0 / 0";
+                document.querySelector("#curr-input").value = "0";
+                return false;
+            }
+            var text = document.querySelector("#result-textarea").value;
+            searchResult = jsStr.search(text, target);
+
+            if (searchResult.length > 0) {
+                document.querySelector("#search-result").innerHTML = "1 / " + searchResult.length;
+                document.querySelector("#curr-input").value = "0";
+                selectRange(searchResult[0][0], searchResult[0][1]);
+            } else {
+                document.querySelector("#search-result").innerHTML = "0 / 0";
+                document.querySelector("#curr-input").value = "0";
+            }
+        }
+        function moveTarget(index) {
+            if (searchResult.length > 0) {
+                document.querySelector("#search-result").innerHTML = (index + 1) + " / " + searchResult.length;
+                document.querySelector("#curr-input").value = index;
+                selectRange(searchResult[index][0], searchResult[index][1]);
+            }
+        }
+        function nextTarget(e) {
+            var curr = parseInt(document.querySelector("#curr-input").value);
+            if (searchResult.length > 0) {
+                if (curr >= searchResult.length - 1) {
+                    curr = 0;
+                } else {
+                    curr++;
+                }
+                moveTarget(curr);
+            }
+        }
+        function prevTarget(e) {
+            var curr = parseInt(document.querySelector("#curr-input").value);
+            if (searchResult.length > 0) {
+                if (curr < 1) {
+                    curr = searchResult.length - 1;
+                } else {
+                    curr--;
+                }
+                moveTarget(curr);
+            }
+        }
+        function replaceTarget(e) {
+            var curr = parseInt(document.querySelector("#curr-input").value);
+            var replacement = document.querySelector("#replace-textarea").value;
+            var start = searchResult[curr][0];
+            var end = searchResult[curr][1];
+            var offset = replacement.length - (end - start);
+            if (searchResult.length > 0) {
+                replaceRange(start, end, replacement);
+                searchResult[curr][1] += offset;
+                for (var i = curr + 1; i < searchResult.length; i++) {
+                    searchResult[i][0] += offset;
+                    searchResult[i][1] += offset;
+                }
+            }
+        }
+        function replaceAllTargets(e) {
+            var replacement = document.querySelector("#replace-textarea").value;
+            for (var i = searchResult.length - 1; i >= 0; i--) {
+                var start = searchResult[i][0];
+                var end = searchResult[i][1];
+                var offset = replacement.length - (end - start);
+                replaceRange(start, end, replacement);
+                searchResult[i][1] += offset;
+                for (var j = i + 1; j < searchResult.length; j++) {
+                    searchResult[j][0] += offset;
+                    searchResult[j][1] += offset;
+                }
+            }
+        }
+        function selectRange(start, end) {
+            var target = document.querySelector("#result-textarea");
+            target.focus();
+            scrollTextarea(target, start, end);
+            target.setSelectionRange(start, end);
+        }
+        function replaceRange(start, end, replacement) {
+            var target = document.querySelector("#result-textarea");
+            target.focus();
+            scrollTextarea(target, start, end);
+            target.setRangeText(replacement, start, end, "select");
+        }
+
+        function scrollTextarea(target, start, end) {
+            // First scroll selection region to view
+            const fullText = target.value;
+            target.value = fullText.substring(0, end);
+            // For some unknown reason, you must store the scollHeight to a variable
+            // before setting the textarea value. Otherwise it won't work for long strings
+            const scrollHeight = target.scrollHeight
+            target.value = fullText;
+            let scrollTop = scrollHeight;
+            const textareaHeight = target.clientHeight;
+            if (scrollTop > textareaHeight){
+                // scroll selection to center of textarea
+                scrollTop -= textareaHeight / 2;
+            } else{
+                scrollTop = 0;
+            }
+            target.scrollTop = scrollTop;
+        }
+
+        function changeIndex(src, dst) {
+            var fromId = src.getAttribute("data-id"),
+                toId = dst.getAttribute("data-id"),
+                fromIndex = files.findIndex((elem) => elem.id == fromId),
+                toIndex = files.findIndex((elem) => elem.id == toId),
+                elems = files.splice(fromIndex, 1);
+
+            files.splice(toIndex, 0, elems[0]);
+
+            startRendering();
+        }
+
+        function removeAll() {
+            files = [];
+            startRendering();
+        }
+
+        function keyDownEvt(e) {
+            if (document.activeElement === document.querySelector("#result-textarea")) {
+                if (e.keyCode === 9) {
+                    // tab
+                    preventEvt(e);
+                    nextTarget(e);
+                }
+            } else if (
+                document.activeElement === document.querySelector("#search-textarea") ||
+                document.activeElement === document.querySelector("#replace-textarea") ||
+                document.activeElement === document.querySelector("#header-textarea") ||
+                document.activeElement === document.querySelector("#footer-textarea")
+            ) {
+                if (e.keyCode === 9) {
+                    // tab
+                    preventEvt(e);
+                    document.activeElement.blur();
+                }
+            }
+        }
+        function downloadEvt(e) {
+            var filename = document.querySelector("#filename-input").value || "jsStr.txt";
+            var text = document.querySelector("#result-textarea").value;
+            var element = document.createElement('a');
+            element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+            element.setAttribute('download', filename);
+            element.style.display = 'none';
+            document.body.appendChild(element);
+            element.click();
+            document.body.removeChild(element);
+        }
+
+        document.querySelector("#file-input").addEventListener("change", getFiles);
+        document.querySelector("#header-textarea").addEventListener("change", startRendering);
+        document.querySelector("#footer-textarea").addEventListener("change", startRendering);
+        document.querySelector("#search-textarea").addEventListener("change", searchText);
+        document.querySelector("#prev-button").addEventListener("click", prevTarget);
+        document.querySelector("#next-button").addEventListener("click", nextTarget);
+        document.querySelector("#replace-button").addEventListener("click", replaceTarget);
+        document.querySelector("#replace-all-button").addEventListener("click", replaceAllTargets);
+        document.querySelector("#download-button").addEventListener("click", downloadEvt);
+        document.querySelector("#clear-button").addEventListener("click", removeAll);
+        document.addEventListener("keydown", keyDownEvt);
+    </script>
+    <script>
+        // test
+        var str = `Lorem ipsum dolor sit amet, consectetur adipiscing elit.`;
+        var arr = ["B","1A","1B","a-2","한국어","1","#","日本語","عربي","2","A","a-12"];
+
+        console.time("search");
+        var res1 = jsStr.search(str, "l", {case: true});
+        console.timeEnd("search");
+        console.log("search:", res1);
+
+        console.time("search");
+        var res2 = jsStr.search(str, ["l", "L"]);
+        console.timeEnd("search");
+        console.log("search:", res2);
+
+        console.time("search");
+        var res3 = jsStr.search(str, /l|L/);
+        console.timeEnd("search");
+        console.log("search:", res3);
+
+        console.time("search");
+        var res33 = jsStr.search("Ｌｏｒｅｍ", "lorem", {case: true, width: true});
+        console.timeEnd("search");
+        console.log("search:", res33);
+
+        console.time("replace");
+        var res4 = jsStr.replace(str, res1, "L");
+        console.timeEnd("replace");
+        console.log("replace:", res4);
+
+        console.time("split");
+        var res5 = jsStr.split(str, res3);
+        console.timeEnd("split");
+        console.log("split:", res5);
+
+        console.time("compare");
+        var res6 = arr.sort(jsStr.compare);
+        console.timeEnd("compare");
+        console.log("compare:", res6);
+
+        console.time("parse");
+        var res7 = jsStr.parse(str, "ipsum consectetur");
+        console.timeEnd("parse");
+        console.log("parse:", res7);
+
+        console.time("parse");
+        var s1 = `Lorem ipsum dolor sit amet, consectetur adipiscing elit.`;
+        var s2 = "ipsum consectetur";
+        var res8 = jsStr.parse(s1, s2);
+        console.timeEnd("parse");
+        console.log("parse:", res8);
+
+        var res9 = res8.map(function(item) {
+            return {
+                isMatched: item.isMatched,
+                from: jsStr.get(s1, item.from),
+                to: jsStr.get(s2, item.to),
+            };
+        });
+        console.log("parse test:", res9);
+
+        var res10 = jsStr.match(s1, s2); // 0.30357142857142855
+        var res11 = jsStr.match(s2, s1); // 1
+        
+        console.log("match:", res10);
+        console.log("match:", res11);
+
+    </script>
+</body>
+
+</html>
+<!-- 
+<body>
+    <script src="./index.js"></script>
+    <script>
+        var { search, replace, split, compare, parse } = jsStr;
+
+        var str = `Lorem ipsum dolor sit amet, consectetur adipiscing elit.`;
+        var target = `Lorem ipsum dolor sit bfmfdv, consectetur adipiscing elit.`;
+        var arr = ["B","1A","1B","a-2","한국어","1","#","日本語","عربي","2","A","a-12"];
+
+        var res = parse(str, target).map(function(item) {
+            // item.from.push(str.substring(...item.from));
+            // item.to.push(target.substring(...item.to));
+            return {
+                isMatched: item.isMatched,
+                from: str.substring(...item.from),
+                to: target.substring(...item.to),
+            };
+        });
+
+        // var res = parse(str, target);
+
+        console.log(res);
+
+    </script>
+</body>
+
+</html> -->
