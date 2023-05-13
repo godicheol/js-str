@@ -1,6 +1,6 @@
 ## Demo
 
-- [Plain text joiner](https://godicheol.github.io/javascript-string/)
+- [Plain text joiner](https://godicheol.github.io/js-str/)
 
 ## Usage
 
